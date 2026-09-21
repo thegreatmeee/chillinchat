@@ -4,7 +4,35 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Anonymous Chat</title>
-    <link rel="stylesheet" href="style.css">
+    <style>
+        /* Sleek, Modern, Center-Focused Responsive Layout styling */
+        * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
+        body { background-color: #f4f6f9; display: flex; justify-content: center; align-items: center; height: 100vh; width: 100vw; overflow: hidden; }
+        .chat-container { width: 100%; max-width: 500px; height: 100%; max-height: 750px; background: #ffffff; display: flex; flex-direction: column; box-shadow: 0 8px 30px rgba(0,0,0,0.08); border-radius: 16px; overflow: hidden; margin: 10px; }
+        header { background: #007bff; color: white; padding: 18px 20px; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid rgba(0,0,0,0.05); }
+        header h2 { font-size: 20px; font-weight: 700; letter-spacing: -0.5px; }
+        .status-text { font-size: 13px; font-weight: 500; background: rgba(255,255,255,0.15); padding: 4px 10px; border-radius: 20px; transition: all 0.3s ease; }
+        .status-text.online { background: #2ecc71; color: white; font-weight: 600; animation: pulse 2s infinite; }
+        @keyframes pulse { 0% { opacity: 0.8; } 50% { opacity: 1; } 100% { opacity: 0.8; } }
+        .chat-box { flex: 1; padding: 20px; background: #fdfdfd; overflow-y: auto; display: flex; flex-direction: column; gap: 12px; scroll-behavior: smooth; }
+        .message { padding: 12px 16px; border-radius: 18px; max-width: 80%; font-size: 15px; line-height: 1.4; word-wrap: break-word; box-shadow: 0 1px 2px rgba(0,0,0,0.05); }
+        .my-message { background: #007bff; color: white; align-self: flex-end; border-bottom-right-radius: 4px; }
+        .stranger-message { background: #f1f3f4; color: #1c1e21; align-self: flex-start; border-bottom-left-radius: 4px; }
+        .system-message { background: #fff3cd; color: #856404; font-size: 13px; font-weight: 500; text-align: center; align-self: center; padding: 8px 16px; border-radius: 30px; max-width: 90%; border: 1px solid #ffeeba; margin: 5px 0; }
+        .controls { padding: 15px; display: flex; gap: 10px; background: #ffffff; border-top: 1px solid #f0f2f5; align-items: center; }
+        input[type="text"] { flex: 1; padding: 14px 18px; border: 1px solid #e4e6eb; border-radius: 24px; outline: none; font-size: 15px; background: #f0f2f5; transition: all 0.2s ease; }
+        input[type="text"]:focus { background: #ffffff; border-color: #007bff; box-shadow: 0 0 0 3px rgba(0,123,255,0.15); }
+        .btn { padding: 12px 24px; border: none; border-radius: 24px; cursor: pointer; font-weight: 600; font-size: 15px; transition: all 0.2s ease; display: flex; align-items: center; justify-content: center; }
+        .send-btn { background: #007bff; color: white; padding: 12px 20px; }
+        .send-btn:hover { background: #0056b3; }
+        .action-container { display: flex; gap: 12px; padding: 0 15px 15px 15px; background: #ffffff; }
+        .start-btn { background: #2ecc71; color: white; }
+        .start-btn:hover { background: #27ae60; }
+        .stop-btn { background: #f8d7da; color: #721c24; border: 1px solid #f5c6cb; }
+        .stop-btn:hover { background: #f5c6cb; }
+        .btn:disabled { opacity: 0.4; cursor: not-allowed; transform: none !important; }
+        @media (max-width: 480px) { .chat-container { margin: 0; height: 100%; max-height: 100%; border-radius: 0; } }
+    </style>
     <script src="https://ably.com"></script>
 </head>
 <body>
@@ -20,7 +48,7 @@
             <input type="text" id="message-input" placeholder="Type a message..." disabled>
             <button id="send-btn" class="btn send-btn" disabled>Send</button>
         </div>
-        <div style="display: flex; gap: 10px; padding: 0 15px 15px 15px;">
+        <div class="action-container">
             <button id="match-btn" class="btn start-btn" style="flex: 1;">Find Match</button>
             <button id="leave-btn" class="btn stop-btn" style="flex: 1;" disabled>Leave Chat</button>
         </div>
@@ -28,7 +56,6 @@
 
     <script>
         let ably, matchChannel, chatChannel;
-        // Generate a cleaner random user string
         let myId = 'user_' + Math.random().toString(36).substring(2, 11);
         let currentRoom = null;
 
@@ -40,48 +67,51 @@
         const statusText = document.getElementById('status');
 
         async function init() {
-            const res = await fetch('/api/config');
-            const data = await res.json();
-            if (!data.apiKey) {
-                appendMessage("Configuration Error: Missing Ably API key in Vercel settings.", "system-message");
-                return;
-            }
-            ably = new Ably.Realtime({ key: data.apiKey, clientId: myId });
-            
-            // This is the global match waiting room channel
-            matchChannel = ably.channels.get('matchmaking-pool');
-            
-            // Listen for direct invitations to join a private room
-            matchChannel.subscribe('presence-match', (msg) => {
-                if (msg.data.target === myId) {
-                    joinChatRoom(msg.data.room);
+            try {
+                const res = await fetch('/api/config');
+                const data = await res.json();
+                if (!data.apiKey) {
+                    appendMessage("Config Error: Add ABLY_API_KEY environment variable inside Vercel Settings.", "system-message");
+                    return;
                 }
-            });
+                ably = new Ably.Realtime({ key: data.apiKey, clientId: myId });
+                
+                ably.connection.on('connected', () => {
+                    statusText.innerText = "Ready";
+                    // Listen for automatic invitations globally
+                    matchChannel = ably.channels.get('matchmaking-pool');
+                    matchChannel.subscribe('presence-match', (msg) => {
+                        if (msg.data.target === myId) {
+                            joinChatRoom(msg.data.room);
+                        }
+                    });
+                });
+            } catch (err) {
+                appendMessage("Failed to initiate networking channel.", "system-message");
+            }
         }
 
         matchBtn.addEventListener('click', () => {
             matchBtn.disabled = true;
             matchBtn.innerText = "Searching...";
-            statusText.innerText = "Looking for a stranger...";
-            chatBox.innerHTML = '<div class="system-message">Searching for an available user...</div>';
+            statusText.innerText = "Searching...";
+            chatBox.innerHTML = '<div class="system-message">Searching for an available user online...</div>';
             
-            // 1. Enter the waiting queue
-            matchChannel.presence.enter({ active: true }, () => {
-                // 2. Look for anyone else currently waiting
+            // Enter pool presence state
+            matchChannel.presence.enter({ searching: true }, () => {
+                // Fetch complete present user list array mapping
                 matchChannel.presence.get((err, members) => {
                     if (err) return;
                     
-                    // Filter out yourself to find strangers
+                    // FIXED: Read target properties directly out of standard member object container mapping
                     const strangers = members.filter(m => m.clientId !== myId);
                     
                     if (strangers.length > 0) {
-                        // Pick the first waiting stranger
+                        // FIXED: Correct extraction of data fields down to index structure
                         const partnerId = strangers[0].clientId;
-                        
-                        // Generate a perfectly matching, alphabetically sorted unique room ID for the pair
                         const generatedRoom = myId < partnerId ? `room_${myId}_${partnerId}` : `room_${partnerId}_${myId}`;
                         
-                        // Send matchmaking signal to both users instantly
+                        // Fire signaling events to bind users cleanly
                         matchChannel.publish('presence-match', { target: partnerId, room: generatedRoom });
                         matchChannel.publish('presence-match', { target: myId, room: generatedRoom });
                     }
@@ -90,169 +120,20 @@
         });
 
         function joinChatRoom(roomName) {
-            if (currentRoom) return; // Prevent double joining
+            if (currentRoom) return; 
             
             currentRoom = roomName;
             matchChannel.presence.leave();
             chatChannel = ably.channels.get(currentRoom);
             
-            statusText.innerText = "Connected!";
+            statusText.innerText = "Connected";
             statusText.className = "status-text online";
-            chatBox.innerHTML = '<div class="system-message">You are now talking to a random stranger! Say Hello!</div>';
+            chatBox.innerHTML = '<div class="system-message">Connected! Say hello to the random stranger.</div>';
             
             messageInput.disabled = false;
             sendBtn.disabled = false;
             leaveBtn.disabled = false;
             matchBtn.disabled = true;
-
-            // Listen for typed messages from the stranger
-            chatChannel.subscribe('msg', (msg) => {
-                if (msg.clientId !== myId) {
-                    appendMessage("Stranger: " + msg.data, "stranger-message");
-                }
-            });
-
-            // Listen for the stranger quitting
-            chatChannel.subscribe('leave', () => {
-                appendMessage("Stranger left the chat.", "system-message");
-                resetUI();
-            });
-        }
-
-        function sendMessage() {
-            const text = messageInput.value.trim();
-            if (!text || !chatChannel) return;
-            chatChannel.publish('msg', text);
-            appendMessage("You: " + text, "my-message");
-            messageInput.value = '';
-        }
-
-        sendBtn.addEventListener('click', sendMessage);
-        messageInput.addEventListener('keypress', (e) => { if (e.key === 'Enter') sendMessage(); });
-        
-        leaveBtn.addEventListener('click', () => {
-            if (chatChannel) {
-                chatChannel.publish('leave', {});
-                chatChannel.unsubscribe();
-            }
-            appendMessage("You left the chat.", "system-message");
-            resetUI();
-        });
-
-        function resetUI() {
-            currentRoom = null;
-            messageInput.disabled = true;
-            sendBtn.disabled = true;
-            leaveBtn.disabled = true;
-            matchBtn.disabled = false;
-            matchBtn.innerText = "Find Match";
-            statusText.innerText = "Disconnected";
-            statusText.className = "status-text";
-        }
-
-        function appendMessage(text, className) {
-            const div = document.createElement('div');
-            div.className = `message ${className}`;
-            div.innerText = text;
-            chatBox.appendChild(div);
-            chatBox.scrollTop = chatBox.scrollHeight;
-        }
-
-        init();
-    </script>
-</body>
-</html>
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Anonymous Chat</title>
-    <link rel="stylesheet" href="style.css">
-    <!-- Include the reliable Ably Realtime library -->
-    <script src="https://ably.com"></script>
-</head>
-<body>
-    <div class="chat-container">
-        <header>
-            <h2>AnimoChat Clone</h2>
-            <div id="status" class="status-text">Disconnected</div>
-        </header>
-        <div id="chat-box" class="chat-box">
-            <div class="system-message">Welcome! Click "Find Match" to start chatting with a stranger.</div>
-        </div>
-        <div class="controls">
-            <input type="text" id="message-input" placeholder="Type a message..." disabled>
-            <button id="send-btn" class="btn send-btn" disabled>Send</button>
-        </div>
-        <div style="display: flex; gap: 10px; padding: 0 15px 15px 15px;">
-            <button id="match-btn" class="btn start-btn" style="flex: 1;">Find Match</button>
-            <button id="leave-btn" class="btn stop-btn" style="flex: 1;" disabled>Leave Chat</button>
-        </div>
-    </div>
-
-    <script>
-        let ably, matchChannel, chatChannel;
-        let myId = 'user_' + Math.random().toString(36).substr(2, 9);
-        let currentRoom = null;
-
-        const matchBtn = document.getElementById('match-btn');
-        const leaveBtn = document.getElementById('leave-btn');
-        const sendBtn = document.getElementById('send-btn');
-        const messageInput = document.getElementById('message-input');
-        const chatBox = document.getElementById('chat-box');
-        const statusText = document.getElementById('status');
-
-        async function init() {
-            const res = await fetch('/api/config');
-            const data = await res.json();
-            if (!data.apiKey) {
-                appendMessage("Configuration Error: Missing Ably API key in Vercel settings.", "system-message");
-                return;
-            }
-            ably = new Ably.Realtime({ key: data.apiKey, clientId: myId });
-            matchChannel = ably.channels.get('matchmaking-pool');
-            
-            matchChannel.subscribe('presence-match', (msg) => {
-                if (msg.data.target === myId) {
-                    joinChatRoom(msg.data.room);
-                }
-            });
-        }
-
-        matchBtn.addEventListener('click', () => {
-            matchBtn.disabled = true;
-            matchBtn.innerText = "Searching...";
-            statusText.innerText = "Looking for a stranger...";
-            
-            matchChannel.presence.enter({ id: myId });
-            matchChannel.presence.get((err, members) => {
-                if (err) return;
-                const waiters = members.filter(m => m.clientId !== myId);
-                if (waiters.length > 0) {
-                    const partner = waiters[0].clientId;
-                    const generatedRoom = 'room_' + Math.min(myId, partner) + '_' + Math.max(myId, partner);
-                    
-                    matchChannel.publish('presence-match', { target: partner, room: generatedRoom });
-                    matchChannel.publish('presence-match', { target: myId, room: generatedRoom });
-                }
-            });
-        });
-
-        function joinChatRoom(roomName) {
-            currentRoom = roomName;
-            matchChannel.presence.leave();
-            chatChannel = ably.channels.get(currentRoom);
-            
-            statusText.innerText = "Connected!";
-            statusText.className = "status-text online";
-            chatBox.innerHTML = '<div class="system-message">You are now talking to a random stranger!</div>';
-            
-            messageInput.disabled = false;
-            sendBtn.disabled = false;
-            leaveBtn.disabled = false;
-            matchBtn.disabled = true;
-            matchBtn.innerText = "Find Match";
 
             chatChannel.subscribe('msg', (msg) => {
                 if (msg.clientId !== myId) {
@@ -299,168 +180,3 @@
 
         function appendMessage(text, className) {
             const div = document.createElement('div');
-            div.className = `message ${className}`;
-            div.innerText = text;
-            chatBox.appendChild(div);
-            chatBox.scrollTop = chatBox.scrollHeight;
-        }
-
-        init();
-    </script>
-</body>
-</html>
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Anonymous Chat</title>
-    <link rel="stylesheet" href="style.css">
-</head>
-<body>
-    <div class="app-container">
-        <header>
-            <h1>🔒 Anonymous Chat</h1>
-            <div id="status-indicator" class="status waiting">Disconnected</div>
-        </header>
-
-        <main class="chat-window" id="chat-window">
-            <div class="message system">Welcome! Click "Find Match" to start chatting with a stranger.</div>
-        </main>
-
-        <div class="input-area">
-            <input type="text" id="message-input" placeholder="Type a message..." disabled autocomplete="off">
-            <button id="send-btn" disabled>Send</button>
-        </div>
-
-        <div class="controls">
-            <button id="find-match-btn" class="btn primary">Find Match</button>
-            <button id="leave-btn" class="btn danger" disabled>Leave Chat</button>
-        </div>
-    </div>
-
-    <!-- Socket.io Client Library -->
-    <script src="/socket.io/socket.io.js"></script>
-    <script>
-        const socket = io();
-
-        // DOM Elements
-        const chatWindow = document.getElementById('chat-window');
-        const messageInput = document.getElementById('message-input');
-        const sendBtn = document.getElementById('send-btn');
-        const findMatchBtn = document.getElementById('find-match-btn');
-        const leaveBtn = document.getElementById('leave-btn');
-        const statusIndicator = document.getElementById('status-indicator');
-
-        let isInChat = false;
-
-        // --- Event Listeners ---
-        findMatchBtn.addEventListener('click', () => {
-            socket.emit('find_match');
-            findMatchBtn.disabled = true;
-            updateStatus('Waiting for a partner...', 'waiting');
-            addSystemMessage('Searching for a random stranger...');
-        });
-
-        leaveBtn.addEventListener('click', () => {
-            socket.emit('leave_chat');
-            resetChatUI();
-            addSystemMessage('You left the chat.');
-        });
-
-        sendBtn.addEventListener('click', sendMessage);
-        messageInput.addEventListener('keypress', (e) => {
-            if (e.key === 'Enter') sendMessage();
-        });
-
-        // --- Socket.io Events ---
-        socket.on('waiting', () => {
-            updateStatus('Waiting for a partner...', 'waiting');
-        });
-
-        socket.on('match_found', () => {
-            isInChat = true;
-            updateStatus('Connected to a stranger!', 'connected');
-            enableChatUI();
-            addSystemMessage('You are now connected. Say hi!');
-        });
-
-        socket.on('receive_message', (data) => {
-            appendMessage(data.text, 'partner', data.timestamp);
-        });
-
-        socket.on('partner_disconnected', () => {
-            isInChat = false;
-            updateStatus('Partner disconnected', 'disconnected');
-            disableChatUI();
-            addSystemMessage('Your partner has left the chat. Click "Find Match" to try again.');
-        });
-
-        // --- Functions ---
-        function sendMessage() {
-            const text = messageInput.value.trim();
-            if (!text || !isInChat) return;
-
-            // Emit to server
-            socket.emit('send_message', { text });
-            
-            // Display locally
-            appendMessage(text, 'me', new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
-            messageInput.value = '';
-        }
-
-        function appendMessage(text, sender, timestamp) {
-            const msgDiv = document.createElement('div');
-            msgDiv.classList.add('message', sender);
-            
-            const textSpan = document.createElement('span');
-            textSpan.textContent = text; // Prevents XSS
-            
-            const timeSpan = document.createElement('span');
-            timeSpan.classList.add('timestamp');
-            timeSpan.textContent = timestamp;
-
-            msgDiv.appendChild(textSpan);
-            msgDiv.appendChild(timeSpan);
-            chatWindow.appendChild(msgDiv);
-            
-            // Auto-scroll to bottom
-            chatWindow.scrollTop = chatWindow.scrollHeight;
-        }
-
-        function addSystemMessage(text) {
-            const msgDiv = document.createElement('div');
-            msgDiv.classList.add('message', 'system');
-            msgDiv.textContent = text;
-            chatWindow.appendChild(msgDiv);
-            chatWindow.scrollTop = chatWindow.scrollHeight;
-        }
-
-        function updateStatus(text, state) {
-            statusIndicator.textContent = text;
-            statusIndicator.className = `status ${state}`;
-        }
-
-        function enableChatUI() {
-            messageInput.disabled = false;
-            sendBtn.disabled = false;
-            leaveBtn.disabled = false;
-            findMatchBtn.disabled = true;
-            messageInput.focus();
-        }
-
-        function disableChatUI() {
-            messageInput.disabled = true;
-            sendBtn.disabled = true;
-            leaveBtn.disabled = true;
-            findMatchBtn.disabled = false;
-        }
-
-        function resetChatUI() {
-            isInChat = false;
-            disableChatUI();
-            updateStatus('Disconnected', 'disconnected');
-        }
-    </script>
-</body>
-</html>
