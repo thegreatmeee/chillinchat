@@ -5,6 +5,170 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Anonymous Chat</title>
     <link rel="stylesheet" href="style.css">
+    <script src="https://ably.com"></script>
+</head>
+<body>
+    <div class="chat-container">
+        <header>
+            <h2>AnimoChat Clone</h2>
+            <div id="status" class="status-text">Disconnected</div>
+        </header>
+        <div id="chat-box" class="chat-box">
+            <div class="system-message">Welcome! Click "Find Match" to start chatting with a stranger.</div>
+        </div>
+        <div class="controls">
+            <input type="text" id="message-input" placeholder="Type a message..." disabled>
+            <button id="send-btn" class="btn send-btn" disabled>Send</button>
+        </div>
+        <div style="display: flex; gap: 10px; padding: 0 15px 15px 15px;">
+            <button id="match-btn" class="btn start-btn" style="flex: 1;">Find Match</button>
+            <button id="leave-btn" class="btn stop-btn" style="flex: 1;" disabled>Leave Chat</button>
+        </div>
+    </div>
+
+    <script>
+        let ably, matchChannel, chatChannel;
+        // Generate a cleaner random user string
+        let myId = 'user_' + Math.random().toString(36).substring(2, 11);
+        let currentRoom = null;
+
+        const matchBtn = document.getElementById('match-btn');
+        const leaveBtn = document.getElementById('leave-btn');
+        const sendBtn = document.getElementById('send-btn');
+        const messageInput = document.getElementById('message-input');
+        const chatBox = document.getElementById('chat-box');
+        const statusText = document.getElementById('status');
+
+        async function init() {
+            const res = await fetch('/api/config');
+            const data = await res.json();
+            if (!data.apiKey) {
+                appendMessage("Configuration Error: Missing Ably API key in Vercel settings.", "system-message");
+                return;
+            }
+            ably = new Ably.Realtime({ key: data.apiKey, clientId: myId });
+            
+            // This is the global match waiting room channel
+            matchChannel = ably.channels.get('matchmaking-pool');
+            
+            // Listen for direct invitations to join a private room
+            matchChannel.subscribe('presence-match', (msg) => {
+                if (msg.data.target === myId) {
+                    joinChatRoom(msg.data.room);
+                }
+            });
+        }
+
+        matchBtn.addEventListener('click', () => {
+            matchBtn.disabled = true;
+            matchBtn.innerText = "Searching...";
+            statusText.innerText = "Looking for a stranger...";
+            chatBox.innerHTML = '<div class="system-message">Searching for an available user...</div>';
+            
+            // 1. Enter the waiting queue
+            matchChannel.presence.enter({ active: true }, () => {
+                // 2. Look for anyone else currently waiting
+                matchChannel.presence.get((err, members) => {
+                    if (err) return;
+                    
+                    // Filter out yourself to find strangers
+                    const strangers = members.filter(m => m.clientId !== myId);
+                    
+                    if (strangers.length > 0) {
+                        // Pick the first waiting stranger
+                        const partnerId = strangers[0].clientId;
+                        
+                        // Generate a perfectly matching, alphabetically sorted unique room ID for the pair
+                        const generatedRoom = myId < partnerId ? `room_${myId}_${partnerId}` : `room_${partnerId}_${myId}`;
+                        
+                        // Send matchmaking signal to both users instantly
+                        matchChannel.publish('presence-match', { target: partnerId, room: generatedRoom });
+                        matchChannel.publish('presence-match', { target: myId, room: generatedRoom });
+                    }
+                });
+            });
+        });
+
+        function joinChatRoom(roomName) {
+            if (currentRoom) return; // Prevent double joining
+            
+            currentRoom = roomName;
+            matchChannel.presence.leave();
+            chatChannel = ably.channels.get(currentRoom);
+            
+            statusText.innerText = "Connected!";
+            statusText.className = "status-text online";
+            chatBox.innerHTML = '<div class="system-message">You are now talking to a random stranger! Say Hello!</div>';
+            
+            messageInput.disabled = false;
+            sendBtn.disabled = false;
+            leaveBtn.disabled = false;
+            matchBtn.disabled = true;
+
+            // Listen for typed messages from the stranger
+            chatChannel.subscribe('msg', (msg) => {
+                if (msg.clientId !== myId) {
+                    appendMessage("Stranger: " + msg.data, "stranger-message");
+                }
+            });
+
+            // Listen for the stranger quitting
+            chatChannel.subscribe('leave', () => {
+                appendMessage("Stranger left the chat.", "system-message");
+                resetUI();
+            });
+        }
+
+        function sendMessage() {
+            const text = messageInput.value.trim();
+            if (!text || !chatChannel) return;
+            chatChannel.publish('msg', text);
+            appendMessage("You: " + text, "my-message");
+            messageInput.value = '';
+        }
+
+        sendBtn.addEventListener('click', sendMessage);
+        messageInput.addEventListener('keypress', (e) => { if (e.key === 'Enter') sendMessage(); });
+        
+        leaveBtn.addEventListener('click', () => {
+            if (chatChannel) {
+                chatChannel.publish('leave', {});
+                chatChannel.unsubscribe();
+            }
+            appendMessage("You left the chat.", "system-message");
+            resetUI();
+        });
+
+        function resetUI() {
+            currentRoom = null;
+            messageInput.disabled = true;
+            sendBtn.disabled = true;
+            leaveBtn.disabled = true;
+            matchBtn.disabled = false;
+            matchBtn.innerText = "Find Match";
+            statusText.innerText = "Disconnected";
+            statusText.className = "status-text";
+        }
+
+        function appendMessage(text, className) {
+            const div = document.createElement('div');
+            div.className = `message ${className}`;
+            div.innerText = text;
+            chatBox.appendChild(div);
+            chatBox.scrollTop = chatBox.scrollHeight;
+        }
+
+        init();
+    </script>
+</body>
+</html>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Anonymous Chat</title>
+    <link rel="stylesheet" href="style.css">
     <!-- Include the reliable Ably Realtime library -->
     <script src="https://ably.com"></script>
 </head>
