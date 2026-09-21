@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Anonymous Chat</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="app-container">
+        <header>
+            <h1>🔒 Anonymous Chat</h1>
+            <div id="status-indicator" class="status waiting">Disconnected</div>
+        </header>
+
+        <main class="chat-window" id="chat-window">
+            <div class="message system">Welcome! Click "Find Match" to start chatting with a stranger.</div>
+        </main>
+
+        <div class="input-area">
+            <input type="text" id="message-input" placeholder="Type a message..." disabled autocomplete="off">
+            <button id="send-btn" disabled>Send</button>
+        </div>
+
+        <div class="controls">
+            <button id="find-match-btn" class="btn primary">Find Match</button>
+            <button id="leave-btn" class="btn danger" disabled>Leave Chat</button>
+        </div>
+    </div>
+
+    <!-- Socket.io Client Library -->
+    <script src="/socket.io/socket.io.js"></script>
+    <script>
+        const socket = io();
+
+        // DOM Elements
+        const chatWindow = document.getElementById('chat-window');
+        const messageInput = document.getElementById('message-input');
+        const sendBtn = document.getElementById('send-btn');
+        const findMatchBtn = document.getElementById('find-match-btn');
+        const leaveBtn = document.getElementById('leave-btn');
+        const statusIndicator = document.getElementById('status-indicator');
+
+        let isInChat = false;
+
+        // --- Event Listeners ---
+        findMatchBtn.addEventListener('click', () => {
+            socket.emit('find_match');
+            findMatchBtn.disabled = true;
+            updateStatus('Waiting for a partner...', 'waiting');
+            addSystemMessage('Searching for a random stranger...');
+        });
+
+        leaveBtn.addEventListener('click', () => {
+            socket.emit('leave_chat');
+            resetChatUI();
+            addSystemMessage('You left the chat.');
+        });
+
+        sendBtn.addEventListener('click', sendMessage);
+        messageInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') sendMessage();
+        });
+
+        // --- Socket.io Events ---
+        socket.on('waiting', () => {
+            updateStatus('Waiting for a partner...', 'waiting');
+        });
+
+        socket.on('match_found', () => {
+            isInChat = true;
+            updateStatus('Connected to a stranger!', 'connected');
+            enableChatUI();
+            addSystemMessage('You are now connected. Say hi!');
+        });
+
+        socket.on('receive_message', (data) => {
+            appendMessage(data.text, 'partner', data.timestamp);
+        });
+
+        socket.on('partner_disconnected', () => {
+            isInChat = false;
+            updateStatus('Partner disconnected', 'disconnected');
+            disableChatUI();
+            addSystemMessage('Your partner has left the chat. Click "Find Match" to try again.');
+        });
+
+        // --- Functions ---
+        function sendMessage() {
+            const text = messageInput.value.trim();
+            if (!text || !isInChat) return;
+
+            // Emit to server
+            socket.emit('send_message', { text });
+            
+            // Display locally
+            appendMessage(text, 'me', new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
+            messageInput.value = '';
+        }
+
+        function appendMessage(text, sender, timestamp) {
+            const msgDiv = document.createElement('div');
+            msgDiv.classList.add('message', sender);
+            
+            const textSpan = document.createElement('span');
+            textSpan.textContent = text; // Prevents XSS
+            
+            const timeSpan = document.createElement('span');
+            timeSpan.classList.add('timestamp');
+            timeSpan.textContent = timestamp;
+
+            msgDiv.appendChild(textSpan);
+            msgDiv.appendChild(timeSpan);
+            chatWindow.appendChild(msgDiv);
+            
+            // Auto-scroll to bottom
+            chatWindow.scrollTop = chatWindow.scrollHeight;
+        }
+
+        function addSystemMessage(text) {
+            const msgDiv = document.createElement('div');
+            msgDiv.classList.add('message', 'system');
+            msgDiv.textContent = text;
+            chatWindow.appendChild(msgDiv);
+            chatWindow.scrollTop = chatWindow.scrollHeight;
+        }
+
+        function updateStatus(text, state) {
+            statusIndicator.textContent = text;
+            statusIndicator.className = `status ${state}`;
+        }
+
+        function enableChatUI() {
+            messageInput.disabled = false;
+            sendBtn.disabled = false;
+            leaveBtn.disabled = false;
+            findMatchBtn.disabled = true;
+            messageInput.focus();
+        }
+
+        function disableChatUI() {
+            messageInput.disabled = true;
+            sendBtn.disabled = true;
+            leaveBtn.disabled = true;
+            findMatchBtn.disabled = false;
+        }
+
+        function resetChatUI() {
+            isInChat = false;
+            disableChatUI();
+            updateStatus('Disconnected', 'disconnected');
+        }
+    </script>
+</body>
+</html>
