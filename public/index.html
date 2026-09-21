@@ -5,6 +5,153 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Anonymous Chat</title>
     <link rel="stylesheet" href="style.css">
+    <!-- Include the reliable Ably Realtime library -->
+    <script src="https://ably.com"></script>
+</head>
+<body>
+    <div class="chat-container">
+        <header>
+            <h2>AnimoChat Clone</h2>
+            <div id="status" class="status-text">Disconnected</div>
+        </header>
+        <div id="chat-box" class="chat-box">
+            <div class="system-message">Welcome! Click "Find Match" to start chatting with a stranger.</div>
+        </div>
+        <div class="controls">
+            <input type="text" id="message-input" placeholder="Type a message..." disabled>
+            <button id="send-btn" class="btn send-btn" disabled>Send</button>
+        </div>
+        <div style="display: flex; gap: 10px; padding: 0 15px 15px 15px;">
+            <button id="match-btn" class="btn start-btn" style="flex: 1;">Find Match</button>
+            <button id="leave-btn" class="btn stop-btn" style="flex: 1;" disabled>Leave Chat</button>
+        </div>
+    </div>
+
+    <script>
+        let ably, matchChannel, chatChannel;
+        let myId = 'user_' + Math.random().toString(36).substr(2, 9);
+        let currentRoom = null;
+
+        const matchBtn = document.getElementById('match-btn');
+        const leaveBtn = document.getElementById('leave-btn');
+        const sendBtn = document.getElementById('send-btn');
+        const messageInput = document.getElementById('message-input');
+        const chatBox = document.getElementById('chat-box');
+        const statusText = document.getElementById('status');
+
+        async function init() {
+            const res = await fetch('/api/config');
+            const data = await res.json();
+            if (!data.apiKey) {
+                appendMessage("Configuration Error: Missing Ably API key in Vercel settings.", "system-message");
+                return;
+            }
+            ably = new Ably.Realtime({ key: data.apiKey, clientId: myId });
+            matchChannel = ably.channels.get('matchmaking-pool');
+            
+            matchChannel.subscribe('presence-match', (msg) => {
+                if (msg.data.target === myId) {
+                    joinChatRoom(msg.data.room);
+                }
+            });
+        }
+
+        matchBtn.addEventListener('click', () => {
+            matchBtn.disabled = true;
+            matchBtn.innerText = "Searching...";
+            statusText.innerText = "Looking for a stranger...";
+            
+            matchChannel.presence.enter({ id: myId });
+            matchChannel.presence.get((err, members) => {
+                if (err) return;
+                const waiters = members.filter(m => m.clientId !== myId);
+                if (waiters.length > 0) {
+                    const partner = waiters[0].clientId;
+                    const generatedRoom = 'room_' + Math.min(myId, partner) + '_' + Math.max(myId, partner);
+                    
+                    matchChannel.publish('presence-match', { target: partner, room: generatedRoom });
+                    matchChannel.publish('presence-match', { target: myId, room: generatedRoom });
+                }
+            });
+        });
+
+        function joinChatRoom(roomName) {
+            currentRoom = roomName;
+            matchChannel.presence.leave();
+            chatChannel = ably.channels.get(currentRoom);
+            
+            statusText.innerText = "Connected!";
+            statusText.className = "status-text online";
+            chatBox.innerHTML = '<div class="system-message">You are now talking to a random stranger!</div>';
+            
+            messageInput.disabled = false;
+            sendBtn.disabled = false;
+            leaveBtn.disabled = false;
+            matchBtn.disabled = true;
+            matchBtn.innerText = "Find Match";
+
+            chatChannel.subscribe('msg', (msg) => {
+                if (msg.clientId !== myId) {
+                    appendMessage("Stranger: " + msg.data, "stranger-message");
+                }
+            });
+
+            chatChannel.subscribe('leave', () => {
+                appendMessage("Stranger left the chat.", "system-message");
+                resetUI();
+            });
+        }
+
+        function sendMessage() {
+            const text = messageInput.value.trim();
+            if (!text || !chatChannel) return;
+            chatChannel.publish('msg', text);
+            appendMessage("You: " + text, "my-message");
+            messageInput.value = '';
+        }
+
+        sendBtn.addEventListener('click', sendMessage);
+        messageInput.addEventListener('keypress', (e) => { if (e.key === 'Enter') sendMessage(); });
+        
+        leaveBtn.addEventListener('click', () => {
+            if (chatChannel) {
+                chatChannel.publish('leave', {});
+                chatChannel.unsubscribe();
+            }
+            appendMessage("You left the chat.", "system-message");
+            resetUI();
+        });
+
+        function resetUI() {
+            currentRoom = null;
+            messageInput.disabled = true;
+            sendBtn.disabled = true;
+            leaveBtn.disabled = true;
+            matchBtn.disabled = false;
+            matchBtn.innerText = "Find Match";
+            statusText.innerText = "Disconnected";
+            statusText.className = "status-text";
+        }
+
+        function appendMessage(text, className) {
+            const div = document.createElement('div');
+            div.className = `message ${className}`;
+            div.innerText = text;
+            chatBox.appendChild(div);
+            chatBox.scrollTop = chatBox.scrollHeight;
+        }
+
+        init();
+    </script>
+</body>
+</html>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Anonymous Chat</title>
+    <link rel="stylesheet" href="style.css">
 </head>
 <body>
     <div class="app-container">
